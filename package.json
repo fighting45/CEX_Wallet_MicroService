@@ -1,0 +1,20 @@
+{
+  "name": "exbotix_wallet_service",
+  "version": "1.0.0",
+  "description": "Exbotix Custodial Wallet Service - Implementation Plan",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RoccoVideo/Exbotix_Wallet_Service.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/RoccoVideo/Exbotix_Wallet_Service/issues"
+  },
+  "homepage": "https://github.com/RoccoVideo/Exbotix_Wallet_Service#readme"
+}
