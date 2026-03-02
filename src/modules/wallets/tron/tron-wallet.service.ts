@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import * as bip39 from 'bip39';
 import { BIP32Factory } from 'bip32';
 import * as ecc from 'tiny-secp256k1';
-const TronWeb = require('tronweb').default || require('tronweb');
+import { SigningKey } from '@ethersproject/signing-key';
+import { keccak256 } from '@ethersproject/keccak256';
+import * as crypto from 'crypto';
 
 /**
  * TronWalletService - Handles Tron HD wallet operations
@@ -22,14 +24,8 @@ export class TronWalletService {
   // 0 = external chain (not change addresses)
   private readonly DERIVATION_PATH = "m/44'/195'/0'/0";
 
-  // TronWeb instance for address utilities
-  private tronWeb: any;
-
   constructor() {
-    // Initialize TronWeb (we don't need a full node for address generation)
-    this.tronWeb = new TronWeb({
-      fullHost: 'https://api.trongrid.io', // We'll use this for utilities only
-    });
+    // No initialization needed - we'll use TronWeb utilities directly
   }
 
   /**
@@ -87,7 +83,7 @@ export class TronWalletService {
 
     // Step 6: Generate Tron address from private key
     // TronWeb handles the conversion to Tron's base58 format
-    const address = this.tronWeb.address.fromPrivateKey(privateKey);
+    const address = TronWeb.address.fromPrivateKey(privateKey);
 
     return {
       address,
@@ -127,7 +123,7 @@ export class TronWalletService {
    * @returns Tron address
    */
   getAddressFromPrivateKey(privateKey: string): string {
-    return this.tronWeb.address.fromPrivateKey(privateKey);
+    return TronWeb.address.fromPrivateKey(privateKey);
   }
 
   /**
@@ -137,7 +133,7 @@ export class TronWalletService {
    * @returns true if valid Tron address
    */
   isValidAddress(address: string): boolean {
-    return this.tronWeb.isAddress(address);
+    return TronWeb.isAddress(address);
   }
 
   /**
@@ -148,7 +144,7 @@ export class TronWalletService {
    * @returns Hex address
    */
   toHexAddress(address: string): string {
-    return this.tronWeb.address.toHex(address);
+    return TronWeb.address.toHex(address);
   }
 
   /**

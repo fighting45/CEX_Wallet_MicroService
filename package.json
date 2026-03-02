@@ -26,6 +26,8 @@
   },
   "homepage": "https://github.com/RoccoVideo/Exbotix_Wallet_Service#readme",
   "dependencies": {
+    "@ethersproject/keccak256": "^5.8.0",
+    "@ethersproject/signing-key": "^5.8.0",
     "@nestjs/common": "^11.1.14",
     "@nestjs/core": "^11.1.14",
     "@nestjs/platform-express": "^11.1.14",
