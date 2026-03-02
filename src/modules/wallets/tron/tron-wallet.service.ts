@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import * as bip39 from 'bip39';
-import * as bip32 from 'bip32';
-import TronWeb from 'tronweb';
+import { BIP32Factory } from 'bip32';
+import * as ecc from 'tiny-secp256k1';
+const TronWeb = require('tronweb').default || require('tronweb');
 
 /**
  * TronWalletService - Handles Tron HD wallet operations
@@ -65,23 +66,26 @@ export class TronWalletService {
     // Step 1: Convert mnemonic to seed (512-bit)
     const seed = bip39.mnemonicToSeedSync(mnemonic);
 
-    // Step 2: Create master key from seed
+    // Step 2: Create BIP32 instance with elliptic curve cryptography
+    const bip32 = BIP32Factory(ecc);
+
+    // Step 3: Create master key from seed
     const root = bip32.fromSeed(seed);
 
-    // Step 3: Derive child key at specific path
+    // Step 4: Derive child key at specific path
     // Example: m/44'/195'/0'/0/0 (first address)
     //          m/44'/195'/0'/0/1 (second address)
     const path = `${this.DERIVATION_PATH}/${index}`;
     const child = root.derivePath(path);
 
-    // Step 4: Get private key from derived child
+    // Step 5: Get private key from derived child
     if (!child.privateKey) {
       throw new Error('Failed to derive private key');
     }
 
-    const privateKey = child.privateKey.toString('hex');
+    const privateKey = Buffer.from(child.privateKey).toString('hex');
 
-    // Step 5: Generate Tron address from private key
+    // Step 6: Generate Tron address from private key
     // TronWeb handles the conversion to Tron's base58 format
     const address = this.tronWeb.address.fromPrivateKey(privateKey);
 
@@ -156,6 +160,7 @@ export class TronWalletService {
    */
   getMasterPublicKey(mnemonic: string): string {
     const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const bip32 = BIP32Factory(ecc);
     const root = bip32.fromSeed(seed);
     const masterNode = root.derivePath(this.DERIVATION_PATH);
 
