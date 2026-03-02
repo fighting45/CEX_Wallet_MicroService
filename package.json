@@ -29,8 +29,11 @@
     "@nestjs/common": "^11.1.14",
     "@nestjs/core": "^11.1.14",
     "@nestjs/platform-express": "^11.1.14",
+    "bip32": "^5.0.1",
+    "bip39": "^3.1.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "tronweb": "^6.2.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.16",
