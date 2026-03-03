@@ -25,7 +25,65 @@ export class TronWalletService {
   private readonly DERIVATION_PATH = "m/44'/195'/0'/0";
 
   constructor() {
-    // No initialization needed - we'll use TronWeb utilities directly
+    // No initialization needed
+  }
+
+  /**
+   * Convert private key to Tron address
+   * Tron uses same elliptic curve as Ethereum (secp256k1)
+   */
+  private privateKeyToAddress(privateKeyHex: string): string {
+    // Step 1: Get public key from private key
+    const signingKey = new SigningKey('0x' + privateKeyHex);
+    const publicKey = signingKey.publicKey; // Returns uncompressed public key with 0x04 prefix
+
+    // Step 2: Get ethereum-style address (keccak256 of public key, last 20 bytes)
+    const publicKeyBytes = Buffer.from(publicKey.slice(4), 'hex'); // Remove 0x04 prefix
+    const hash = keccak256(publicKeyBytes);
+    const addressBytes = Buffer.from(hash.slice(-40), 'hex'); // Last 20 bytes
+
+    // Step 3: Add Tron prefix (0x41 = mainnet)
+    const tronPrefix = Buffer.from([0x41]);
+    const addressWithPrefix = Buffer.concat([tronPrefix, addressBytes]);
+
+    // Step 4: Double SHA256 for checksum
+    const hash1 = crypto.createHash('sha256').update(addressWithPrefix).digest();
+    const hash2 = crypto.createHash('sha256').update(hash1).digest();
+    const checksum = hash2.slice(0, 4);
+
+    // Step 5: Concatenate address + checksum and base58 encode
+    const addressWithChecksum = Buffer.concat([addressWithPrefix, checksum]);
+
+    // Base58 encode
+    return this.base58Encode(addressWithChecksum);
+  }
+
+  /**
+   * Base58 encoding (Bitcoin/Tron style)
+   */
+  private base58Encode(buffer: Buffer): string {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    const digits = [0];
+
+    for (let i = 0; i < buffer.length; i++) {
+      let carry = buffer[i];
+      for (let j = 0; j < digits.length; j++) {
+        carry += digits[j] << 8;
+        digits[j] = carry % 58;
+        carry = (carry / 58) | 0;
+      }
+      while (carry > 0) {
+        digits.push(carry % 58);
+        carry = (carry / 58) | 0;
+      }
+    }
+
+    // Add leading zeros
+    for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+      digits.push(0);
+    }
+
+    return digits.reverse().map(digit => ALPHABET[digit]).join('');
   }
 
   /**
@@ -82,8 +140,7 @@ export class TronWalletService {
     const privateKey = Buffer.from(child.privateKey).toString('hex');
 
     // Step 6: Generate Tron address from private key
-    // TronWeb handles the conversion to Tron's base58 format
-    const address = TronWeb.address.fromPrivateKey(privateKey);
+    const address = this.privateKeyToAddress(privateKey);
 
     return {
       address,
@@ -123,7 +180,7 @@ export class TronWalletService {
    * @returns Tron address
    */
   getAddressFromPrivateKey(privateKey: string): string {
-    return TronWeb.address.fromPrivateKey(privateKey);
+    return this.privateKeyToAddress(privateKey);
   }
 
   /**
@@ -133,7 +190,8 @@ export class TronWalletService {
    * @returns true if valid Tron address
    */
   isValidAddress(address: string): boolean {
-    return TronWeb.isAddress(address);
+    // Basic validation: Tron mainnet addresses start with 'T' and are 34 chars
+    return address.length === 34 && address.startsWith('T');
   }
 
   /**
@@ -144,7 +202,42 @@ export class TronWalletService {
    * @returns Hex address
    */
   toHexAddress(address: string): string {
-    return TronWeb.address.toHex(address);
+    // Decode base58 and remove prefix + checksum
+    const decoded = this.base58Decode(address);
+    // Remove Tron prefix (0x41) and checksum (last 4 bytes)
+    return '0x' + decoded.slice(1, 21).toString('hex');
+  }
+
+  /**
+   * Base58 decoding
+   */
+  private base58Decode(str: string): Buffer {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    const bytes = [0];
+
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      const value = ALPHABET.indexOf(c);
+      if (value === -1) throw new Error('Invalid base58 character');
+
+      let carry = value;
+      for (let j = 0; j < bytes.length; j++) {
+        carry += bytes[j] * 58;
+        bytes[j] = carry & 0xff;
+        carry >>= 8;
+      }
+      while (carry > 0) {
+        bytes.push(carry & 0xff);
+        carry >>= 8;
+      }
+    }
+
+    // Add leading zeros
+    for (let i = 0; i < str.length && str[i] === '1'; i++) {
+      bytes.push(0);
+    }
+
+    return Buffer.from(bytes.reverse());
   }
 
   /**
