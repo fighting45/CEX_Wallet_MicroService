@@ -1,0 +1,416 @@
+{
+  "info": {
+    "name": "Exbotix Wallet Service",
+    "description": "HD Wallet generation for Tron, Ethereum, Bitcoin, and Solana",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:3000/api/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "health"]
+        }
+      }
+    },
+    {
+      "name": "Tron Wallets",
+      "item": [
+        {
+          "name": "Generate Tron Wallet (1 address)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/tron/generate?count=1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "tron", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Tron Wallet (3 addresses)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/tron/generate?count=3",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "tron", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Derive Tron Address from Mnemonic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/tron/derive?mnemonic=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about&index=0",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "tron", "derive"],
+              "query": [
+                {
+                  "key": "mnemonic",
+                  "value": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                },
+                {
+                  "key": "index",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate Tron Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/tron/validate?address=TYour...Address",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "tron", "validate"],
+              "query": [
+                {
+                  "key": "address",
+                  "value": "TYour...Address",
+                  "description": "Replace with actual Tron address"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ethereum Wallets",
+      "item": [
+        {
+          "name": "Generate Ethereum Wallet (1 address)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/ethereum/generate?count=1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "ethereum", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Ethereum Wallet (3 addresses)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/ethereum/generate?count=3",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "ethereum", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Derive Ethereum Address from Mnemonic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/ethereum/derive?mnemonic=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about&index=0",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "ethereum", "derive"],
+              "query": [
+                {
+                  "key": "mnemonic",
+                  "value": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                },
+                {
+                  "key": "index",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate Ethereum Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/ethereum/validate?address=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "ethereum", "validate"],
+              "query": [
+                {
+                  "key": "address",
+                  "value": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bitcoin Wallets",
+      "item": [
+        {
+          "name": "Generate Bitcoin Wallet - Native SegWit (1 address)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/bitcoin/generate?count=1&type=native-segwit",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "bitcoin", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "1"
+                },
+                {
+                  "key": "type",
+                  "value": "native-segwit"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Bitcoin Wallet - Native SegWit (3 addresses)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/bitcoin/generate?count=3&type=native-segwit",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "bitcoin", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "3"
+                },
+                {
+                  "key": "type",
+                  "value": "native-segwit"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Bitcoin Wallet - Legacy (3 addresses)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/bitcoin/generate?count=3&type=legacy",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "bitcoin", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "3"
+                },
+                {
+                  "key": "type",
+                  "value": "legacy"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Derive Bitcoin Address from Mnemonic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/bitcoin/derive?mnemonic=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about&index=0&type=native-segwit",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "bitcoin", "derive"],
+              "query": [
+                {
+                  "key": "mnemonic",
+                  "value": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                },
+                {
+                  "key": "index",
+                  "value": "0"
+                },
+                {
+                  "key": "type",
+                  "value": "native-segwit"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate Bitcoin Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/bitcoin/validate?address=bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "bitcoin", "validate"],
+              "query": [
+                {
+                  "key": "address",
+                  "value": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Solana Wallets",
+      "item": [
+        {
+          "name": "Generate Solana Wallet (1 address)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/solana/generate?count=1",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "solana", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Solana Wallet (3 addresses)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/solana/generate?count=3",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "solana", "generate"],
+              "query": [
+                {
+                  "key": "count",
+                  "value": "3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Derive Solana Address from Mnemonic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/solana/derive?mnemonic=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about&index=0",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "solana", "derive"],
+              "query": [
+                {
+                  "key": "mnemonic",
+                  "value": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                },
+                {
+                  "key": "index",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate Solana Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:3000/api/wallets/solana/validate?address=GgQTHtdktx1vYLPSNcxov9RLrYoWpy1YnFxERccmff9r",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["api", "wallets", "solana", "validate"],
+              "query": [
+                {
+                  "key": "address",
+                  "value": "GgQTHtdktx1vYLPSNcxov9RLrYoWpy1YnFxERccmff9r"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
