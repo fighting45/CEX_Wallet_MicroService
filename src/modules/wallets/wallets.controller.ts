@@ -1,6 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { TronWalletService } from './tron/tron-wallet.service';
 import { EthereumWalletService } from './ethereum/ethereum-wallet.service';
+import { BitcoinWalletService } from './bitcoin/bitcoin-wallet.service';
 import { EncryptionService } from '../encryption/encryption.service';
 
 /**
@@ -14,6 +15,7 @@ export class WalletsController {
   constructor(
     private readonly tronWalletService: TronWalletService,
     private readonly ethereumWalletService: EthereumWalletService,
+    private readonly bitcoinWalletService: BitcoinWalletService,
     private readonly encryptionService: EncryptionService,
   ) {}
 
@@ -237,6 +239,131 @@ export class WalletsController {
       isValid: this.ethereumWalletService.isValidAddress(address),
       checksumAddress: this.ethereumWalletService.isValidAddress(address)
         ? this.ethereumWalletService.getChecksumAddress(address)
+        : null,
+    };
+  }
+
+  /**
+   * Test endpoint: Generate a new Bitcoin wallet
+   * GET /api/wallets/bitcoin/generate
+   *
+   * Query params:
+   * - count: number of addresses to generate (default: 1)
+   * - type: address type (native-segwit or legacy, default: native-segwit)
+   */
+  @Get('bitcoin/generate')
+  generateBitcoinWallet(
+    @Query('count') count?: string,
+    @Query('type') type?: string,
+  ) {
+    const addressCount = count ? parseInt(count, 10) : 1;
+    const addressType = (type === 'legacy' ? 'legacy' : 'native-segwit') as 'legacy' | 'native-segwit';
+
+    // Step 1: Generate new mnemonic
+    const mnemonic = this.bitcoinWalletService.generateMnemonic(12);
+
+    // Step 2: Encrypt the mnemonic for safe storage
+    const masterPassword = process.env.MASTER_ENCRYPTION_KEY || 'test-password-only-for-dev';
+    const encryptedMnemonic = this.encryptionService.encrypt(mnemonic, masterPassword);
+
+    // Step 3: Derive addresses
+    const addresses = this.bitcoinWalletService.deriveMultipleAddresses(
+      mnemonic,
+      0,
+      addressCount,
+      addressType,
+    );
+
+    // Step 4: Test decryption
+    const decryptedMnemonic = this.encryptionService.decrypt(
+      encryptedMnemonic,
+      masterPassword,
+    );
+
+    return {
+      message: 'Bitcoin wallet generated successfully',
+      addressType: addressType === 'legacy' ? 'Legacy (P2PKH)' : 'Native SegWit (Bech32)',
+      mnemonic: {
+        original: mnemonic,
+        encrypted: encryptedMnemonic,
+        decrypted: decryptedMnemonic,
+        encryptionWorks: mnemonic === decryptedMnemonic,
+      },
+      addresses: addresses.map((addr) => ({
+        address: addr.address,
+        addressFormat: addr.addressFormat,
+        derivationPath: addr.derivationPath,
+        index: addr.index,
+        publicKey: addr.publicKey,
+        // WARNING: In production, NEVER expose private keys in API responses!
+        privateKeyWIF: addr.privateKeyWIF,
+        privateKeyHex: addr.privateKeyHex,
+      })),
+      note: 'SECURITY WARNING: Private keys shown for testing only. Never expose in production!',
+    };
+  }
+
+  /**
+   * Test endpoint: Derive address from existing mnemonic
+   * GET /api/wallets/bitcoin/derive
+   *
+   * Query params:
+   * - mnemonic: the seed phrase
+   * - index: derivation index (default: 0)
+   * - type: address type (native-segwit or legacy)
+   */
+  @Get('bitcoin/derive')
+  deriveBitcoinAddress(
+    @Query('mnemonic') mnemonic: string,
+    @Query('index') index?: string,
+    @Query('type') type?: string,
+  ) {
+    if (!mnemonic) {
+      return {
+        error: 'Mnemonic is required',
+        example: '/api/wallets/bitcoin/derive?mnemonic=your twelve word phrase here&index=0&type=native-segwit',
+      };
+    }
+
+    // Validate mnemonic
+    if (!this.bitcoinWalletService.validateMnemonic(mnemonic)) {
+      return {
+        error: 'Invalid mnemonic phrase',
+      };
+    }
+
+    const addressIndex = index ? parseInt(index, 10) : 0;
+    const addressType = (type === 'legacy' ? 'legacy' : 'native-segwit') as 'legacy' | 'native-segwit';
+    const address = this.bitcoinWalletService.deriveAddress(mnemonic, addressIndex, addressType);
+
+    return {
+      address: address.address,
+      addressFormat: address.addressFormat,
+      derivationPath: address.derivationPath,
+      index: address.index,
+      isValidAddress: this.bitcoinWalletService.isValidAddress(address.address),
+      addressType: this.bitcoinWalletService.getAddressType(address.address),
+    };
+  }
+
+  /**
+   * Test endpoint: Validate a Bitcoin address
+   * GET /api/wallets/bitcoin/validate?address=bc1...
+   */
+  @Get('bitcoin/validate')
+  validateBitcoinAddress(@Query('address') address: string) {
+    if (!address) {
+      return {
+        error: 'Address is required',
+        example: '/api/wallets/bitcoin/validate?address=bc1qYour...Address',
+      };
+    }
+
+    return {
+      address,
+      isValid: this.bitcoinWalletService.isValidAddress(address),
+      addressType: this.bitcoinWalletService.isValidAddress(address)
+        ? this.bitcoinWalletService.getAddressType(address)
         : null,
     };
   }

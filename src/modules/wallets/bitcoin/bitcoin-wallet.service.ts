@@ -3,6 +3,7 @@ import * as bip39 from 'bip39';
 import { BIP32Factory } from 'bip32';
 import * as ecc from 'tiny-secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
+import ECPairFactory from 'ecpair';
 
 /**
  * BitcoinWalletService - Handles Bitcoin HD wallet operations
@@ -100,14 +101,14 @@ export class BitcoinWalletService {
 
     // Step 6: Get WIF (Wallet Import Format) for private key
     const privateKeyWIF = child.toWIF();
-    const privateKeyHex = child.privateKey.toString('hex');
+    const privateKeyHex = Buffer.from(child.privateKey).toString('hex');
 
     return {
       address,
       addressFormat,
       privateKeyWIF, // Standard format for Bitcoin wallets
       privateKeyHex, // Hex format
-      publicKey: child.publicKey.toString('hex'),
+      publicKey: Buffer.from(child.publicKey).toString('hex'),
       derivationPath: path,
       index,
     };
@@ -148,7 +149,8 @@ export class BitcoinWalletService {
     wif: string,
     addressType: 'legacy' | 'native-segwit' = 'native-segwit',
   ): string {
-    const keyPair = bitcoin.ECPair.fromWIF(wif, this.network);
+    const ECPair = ECPairFactory(ecc);
+    const keyPair = ECPair.fromWIF(wif, this.network);
 
     if (addressType === 'legacy') {
       const payment = bitcoin.payments.p2pkh({
