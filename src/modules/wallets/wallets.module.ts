@@ -3,6 +3,7 @@ import { WalletsController } from './wallets.controller';
 import { TronWalletModule } from './tron/tron-wallet.module';
 import { EthereumWalletModule } from './ethereum/ethereum-wallet.module';
 import { BitcoinWalletModule } from './bitcoin/bitcoin-wallet.module';
+import { SolanaWalletModule } from './solana/solana-wallet.module';
 import { EncryptionModule } from '../encryption/encryption.module';
 
 /**
@@ -15,6 +16,7 @@ import { EncryptionModule } from '../encryption/encryption.module';
     TronWalletModule, // Tron wallet functionality
     EthereumWalletModule, // Ethereum & EVM chains wallet functionality
     BitcoinWalletModule, // Bitcoin wallet functionality
+    SolanaWalletModule, // Solana wallet functionality
     EncryptionModule, // Encryption for seed storage
   ],
   controllers: [WalletsController],

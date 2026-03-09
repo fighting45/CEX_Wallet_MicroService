@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { TronWalletService } from './tron/tron-wallet.service';
 import { EthereumWalletService } from './ethereum/ethereum-wallet.service';
 import { BitcoinWalletService } from './bitcoin/bitcoin-wallet.service';
+import { SolanaWalletService } from './solana/solana-wallet.service';
 import { EncryptionService } from '../encryption/encryption.service';
 
 /**
@@ -16,6 +17,7 @@ export class WalletsController {
     private readonly tronWalletService: TronWalletService,
     private readonly ethereumWalletService: EthereumWalletService,
     private readonly bitcoinWalletService: BitcoinWalletService,
+    private readonly solanaWalletService: SolanaWalletService,
     private readonly encryptionService: EncryptionService,
   ) {}
 
@@ -365,6 +367,116 @@ export class WalletsController {
       addressType: this.bitcoinWalletService.isValidAddress(address)
         ? this.bitcoinWalletService.getAddressType(address)
         : null,
+    };
+  }
+
+  /**
+   * Test endpoint: Generate a new Solana wallet
+   * GET /api/wallets/solana/generate
+   *
+   * Query params:
+   * - count: number of addresses to generate (default: 1)
+   */
+  @Get('solana/generate')
+  generateSolanaWallet(@Query('count') count?: string) {
+    const addressCount = count ? parseInt(count, 10) : 1;
+
+    // Step 1: Generate new mnemonic
+    const mnemonic = this.solanaWalletService.generateMnemonic(12);
+
+    // Step 2: Encrypt the mnemonic for safe storage
+    const masterPassword = process.env.MASTER_ENCRYPTION_KEY || 'test-password-only-for-dev';
+    const encryptedMnemonic = this.encryptionService.encrypt(mnemonic, masterPassword);
+
+    // Step 3: Derive addresses
+    const addresses = this.solanaWalletService.deriveMultipleAddresses(
+      mnemonic,
+      0,
+      addressCount,
+    );
+
+    // Step 4: Test decryption
+    const decryptedMnemonic = this.encryptionService.decrypt(
+      encryptedMnemonic,
+      masterPassword,
+    );
+
+    return {
+      message: 'Solana wallet generated successfully',
+      mnemonic: {
+        original: mnemonic,
+        encrypted: encryptedMnemonic,
+        decrypted: decryptedMnemonic,
+        encryptionWorks: mnemonic === decryptedMnemonic,
+      },
+      addresses: addresses.map((addr) => ({
+        address: addr.address,
+        publicKey: addr.publicKey,
+        derivationPath: addr.derivationPath,
+        index: addr.index,
+        // WARNING: In production, NEVER expose private keys in API responses!
+        privateKey: addr.privateKey,
+      })),
+      note: 'SECURITY WARNING: Private keys shown for testing only. Never expose in production!',
+      supportedTokens: ['SOL', 'USDC', 'USDT', 'All SPL tokens'],
+    };
+  }
+
+  /**
+   * Test endpoint: Derive address from existing mnemonic
+   * GET /api/wallets/solana/derive
+   *
+   * Query params:
+   * - mnemonic: the seed phrase
+   * - index: derivation index (default: 0)
+   */
+  @Get('solana/derive')
+  deriveSolanaAddress(
+    @Query('mnemonic') mnemonic: string,
+    @Query('index') index?: string,
+  ) {
+    if (!mnemonic) {
+      return {
+        error: 'Mnemonic is required',
+        example: '/api/wallets/solana/derive?mnemonic=your twelve word phrase here&index=0',
+      };
+    }
+
+    // Validate mnemonic
+    if (!this.solanaWalletService.validateMnemonic(mnemonic)) {
+      return {
+        error: 'Invalid mnemonic phrase',
+      };
+    }
+
+    const addressIndex = index ? parseInt(index, 10) : 0;
+    const address = this.solanaWalletService.deriveAddress(mnemonic, addressIndex);
+
+    return {
+      address: address.address,
+      publicKey: address.publicKey,
+      derivationPath: address.derivationPath,
+      index: address.index,
+      isValidAddress: this.solanaWalletService.isValidAddress(address.address),
+    };
+  }
+
+  /**
+   * Test endpoint: Validate a Solana address
+   * GET /api/wallets/solana/validate?address=...
+   */
+  @Get('solana/validate')
+  validateSolanaAddress(@Query('address') address: string) {
+    if (!address) {
+      return {
+        error: 'Address is required',
+        example: '/api/wallets/solana/validate?address=YourSolanaAddress',
+      };
+    }
+
+    return {
+      address,
+      isValid: this.solanaWalletService.isValidAddress(address),
     };
   }
 }
