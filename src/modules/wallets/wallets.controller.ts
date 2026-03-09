@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { TronWalletService } from './tron/tron-wallet.service';
+import { EthereumWalletService } from './ethereum/ethereum-wallet.service';
 import { EncryptionService } from '../encryption/encryption.service';
 
 /**
@@ -12,6 +13,7 @@ import { EncryptionService } from '../encryption/encryption.service';
 export class WalletsController {
   constructor(
     private readonly tronWalletService: TronWalletService,
+    private readonly ethereumWalletService: EthereumWalletService,
     private readonly encryptionService: EncryptionService,
   ) {}
 
@@ -123,6 +125,118 @@ export class WalletsController {
       isValid: this.tronWalletService.isValidAddress(address),
       hexAddress: this.tronWalletService.isValidAddress(address)
         ? this.tronWalletService.toHexAddress(address)
+        : null,
+    };
+  }
+
+  /**
+   * Test endpoint: Generate a new Ethereum wallet
+   * GET /api/wallets/ethereum/generate
+   *
+   * Query params:
+   * - count: number of addresses to generate (default: 1)
+   */
+  @Get('ethereum/generate')
+  generateEthereumWallet(@Query('count') count?: string) {
+    const addressCount = count ? parseInt(count, 10) : 1;
+
+    // Step 1: Generate new mnemonic
+    const mnemonic = this.ethereumWalletService.generateMnemonic(12);
+
+    // Step 2: Encrypt the mnemonic for safe storage
+    const masterPassword = process.env.MASTER_ENCRYPTION_KEY || 'test-password-only-for-dev';
+    const encryptedMnemonic = this.encryptionService.encrypt(mnemonic, masterPassword);
+
+    // Step 3: Derive addresses
+    const addresses = this.ethereumWalletService.deriveMultipleAddresses(
+      mnemonic,
+      0,
+      addressCount,
+    );
+
+    // Step 4: Test decryption
+    const decryptedMnemonic = this.encryptionService.decrypt(
+      encryptedMnemonic,
+      masterPassword,
+    );
+
+    return {
+      message: 'Ethereum wallet generated successfully',
+      mnemonic: {
+        original: mnemonic,
+        encrypted: encryptedMnemonic,
+        decrypted: decryptedMnemonic,
+        encryptionWorks: mnemonic === decryptedMnemonic,
+      },
+      addresses: addresses.map((addr) => ({
+        address: addr.address,
+        derivationPath: addr.derivationPath,
+        index: addr.index,
+        // WARNING: In production, NEVER expose private keys in API responses!
+        privateKey: addr.privateKey,
+      })),
+      note: 'SECURITY WARNING: Private keys shown for testing only. Never expose in production!',
+      supportedChains: ['Ethereum', 'BSC', 'Polygon', 'Arbitrum', 'Avalanche', 'Optimism'],
+    };
+  }
+
+  /**
+   * Test endpoint: Derive address from existing mnemonic
+   * GET /api/wallets/ethereum/derive
+   *
+   * Query params:
+   * - mnemonic: the seed phrase
+   * - index: derivation index (default: 0)
+   */
+  @Get('ethereum/derive')
+  deriveEthereumAddress(
+    @Query('mnemonic') mnemonic: string,
+    @Query('index') index?: string,
+  ) {
+    if (!mnemonic) {
+      return {
+        error: 'Mnemonic is required',
+        example: '/api/wallets/ethereum/derive?mnemonic=your twelve word phrase here&index=0',
+      };
+    }
+
+    // Validate mnemonic
+    if (!this.ethereumWalletService.validateMnemonic(mnemonic)) {
+      return {
+        error: 'Invalid mnemonic phrase',
+      };
+    }
+
+    const addressIndex = index ? parseInt(index, 10) : 0;
+    const address = this.ethereumWalletService.deriveAddress(mnemonic, addressIndex);
+
+    return {
+      address: address.address,
+      derivationPath: address.derivationPath,
+      index: address.index,
+      isValidAddress: this.ethereumWalletService.isValidAddress(address.address),
+      checksumAddress: this.ethereumWalletService.getChecksumAddress(address.address),
+    };
+  }
+
+  /**
+   * Test endpoint: Validate an Ethereum address
+   * GET /api/wallets/ethereum/validate?address=0x...
+   */
+  @Get('ethereum/validate')
+  validateEthereumAddress(@Query('address') address: string) {
+    if (!address) {
+      return {
+        error: 'Address is required',
+        example: '/api/wallets/ethereum/validate?address=0xYour...Address',
+      };
+    }
+
+    return {
+      address,
+      isValid: this.ethereumWalletService.isValidAddress(address),
+      checksumAddress: this.ethereumWalletService.isValidAddress(address)
+        ? this.ethereumWalletService.getChecksumAddress(address)
         : null,
     };
   }
