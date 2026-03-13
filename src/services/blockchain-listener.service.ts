@@ -62,10 +62,10 @@ export class BlockchainListenerService {
           await this.checkTronDeposits(addr.user_id, addr.address);
         }
 
-        await this.sleep(30000); // Check every 30 seconds
+        await this.sleep(300000); // Check every 5 minutes
       } catch (error) {
         console.error('Tron listener error:', error.message);
-        await this.sleep(60000); // Wait longer on error
+        await this.sleep(300000); // Wait longer on error
       }
     }
   }
@@ -473,10 +473,10 @@ export class BlockchainListenerService {
           await this.checkBitcoinDeposits(addr.user_id, addr.address);
         }
 
-        await this.sleep(60000); // Check every 60 seconds (Bitcoin is slower)
+        await this.sleep(300000); // Check every 5 minutes
       } catch (error) {
         console.error('Bitcoin listener error:', error.message);
-        await this.sleep(120000);
+        await this.sleep(300000);
       }
     }
   }
