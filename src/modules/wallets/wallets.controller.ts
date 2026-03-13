@@ -1,9 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Post, Query, Param, Body } from '@nestjs/common';
 import { TronWalletService } from './tron/tron-wallet.service';
 import { EthereumWalletService } from './ethereum/ethereum-wallet.service';
 import { BitcoinWalletService } from './bitcoin/bitcoin-wallet.service';
 import { SolanaWalletService } from './solana/solana-wallet.service';
-import { EncryptionService } from '../encryption/encryption.service';
+import { EncryptionService, EncryptedData } from '../encryption/encryption.service';
 
 /**
  * WalletsController - Test endpoints for wallet generation
@@ -20,6 +20,191 @@ export class WalletsController {
     private readonly solanaWalletService: SolanaWalletService,
     private readonly encryptionService: EncryptionService,
   ) {}
+
+  // ==================== PRODUCTION ENDPOINTS ====================
+
+  /**
+   * Generate master mnemonic for initial setup (ONE-TIME USE)
+   * GET /api/wallets/:network/generate-mnemonic
+   *
+   * Call this ONCE per network during initial setup, then save encrypted mnemonic in your database
+   *
+   * Supported networks: tron, ethereum, bitcoin, solana
+   */
+  @Get(':network/generate-mnemonic')
+  generateMasterMnemonic(@Param('network') network: string) {
+    // Select wallet service based on network
+    let service;
+    switch (network.toLowerCase()) {
+      case 'tron':
+        service = this.tronWalletService;
+        break;
+      case 'ethereum':
+        service = this.ethereumWalletService;
+        break;
+      case 'bitcoin':
+        service = this.bitcoinWalletService;
+        break;
+      case 'solana':
+        service = this.solanaWalletService;
+        break;
+      default:
+        return {
+          error: 'Invalid network',
+          supportedNetworks: ['tron', 'ethereum', 'bitcoin', 'solana'],
+          example: '/api/wallets/tron/generate-mnemonic',
+        };
+    }
+
+    // Generate 12-word mnemonic
+    const mnemonic = service.generateMnemonic(12);
+
+    // Encrypt with master password
+    const masterPassword = process.env.MASTER_ENCRYPTION_KEY || 'test-password-only-for-dev';
+    const encryptedMnemonic = this.encryptionService.encrypt(mnemonic, masterPassword);
+
+    return {
+      success: true,
+      network: network.toLowerCase(),
+      mnemonic: mnemonic, // Plain text - only shown during setup
+      encrypted: encryptedMnemonic, // Store this in your database
+      instructions: [
+        '1. Save the ENCRYPTED mnemonic in your database (master_seeds table)',
+        '2. NEVER expose the plain mnemonic again after this setup',
+        '3. Set next_index = 1 in database (index 0 = hot wallet)',
+        '4. Use /api/wallets/get-address endpoint to derive user addresses',
+      ],
+      security_warning:
+        '⚠️  This endpoint is for ONE-TIME initial setup only. Disable in production after setup!',
+    };
+  }
+
+  /**
+   * Get new address for user (PRODUCTION ENDPOINT)
+   * POST /api/wallets/get-address
+   *
+   * This is the main endpoint your backend will call when a user requests a deposit address
+   *
+   * Request body:
+   * {
+   *   "network": "tron",
+   *   "encrypted_mnemonic": {
+   *     "encrypted": "abc123...",
+   *     "iv": "def456...",
+   *     "salt": "ghi789...",
+   *     "authTag": "jkl012..."
+   *   },
+   *   "index": 123
+   * }
+   */
+  @Post('get-address')
+  async getAddressForUser(
+    @Body('network') network: string,
+    @Body('encrypted_mnemonic') encryptedMnemonic: EncryptedData,
+    @Body('index') index: number,
+  ) {
+    // Validate inputs
+    if (!network || !encryptedMnemonic || index === undefined) {
+      return {
+        error: 'Missing required fields',
+        required: {
+          network: 'tron | ethereum | bitcoin | solana',
+          encrypted_mnemonic: {
+            encrypted: 'hex string',
+            iv: 'hex string',
+            salt: 'hex string',
+            authTag: 'hex string',
+          },
+          index: 'Derivation index (integer)',
+        },
+        example: {
+          network: 'tron',
+          encrypted_mnemonic: {
+            encrypted: 'abc123...',
+            iv: 'def456...',
+            salt: 'ghi789...',
+            authTag: 'jkl012...',
+          },
+          index: 123,
+        },
+      };
+    }
+
+    // Select wallet service
+    let service;
+    let addressType: 'native-segwit' | 'legacy' = 'native-segwit'; // For Bitcoin
+    switch (network.toLowerCase()) {
+      case 'tron':
+        service = this.tronWalletService;
+        break;
+      case 'ethereum':
+        service = this.ethereumWalletService;
+        break;
+      case 'bitcoin':
+        service = this.bitcoinWalletService;
+        break;
+      case 'solana':
+        service = this.solanaWalletService;
+        break;
+      default:
+        return {
+          error: 'Invalid network',
+          supportedNetworks: ['tron', 'ethereum', 'bitcoin', 'solana'],
+        };
+    }
+
+    try {
+      // Decrypt mnemonic
+      const masterPassword = process.env.MASTER_ENCRYPTION_KEY || 'test-password-only-for-dev';
+      const mnemonic = this.encryptionService.decrypt(encryptedMnemonic, masterPassword);
+
+      // Validate mnemonic
+      if (!service.validateMnemonic(mnemonic)) {
+        return {
+          error: 'Invalid mnemonic after decryption',
+          hint: 'Check if MASTER_ENCRYPTION_KEY matches the one used during encryption',
+        };
+      }
+
+      // Derive address at specified index
+      let addressData;
+      if (network.toLowerCase() === 'bitcoin') {
+        addressData = service.deriveAddress(mnemonic, index, addressType);
+      } else {
+        addressData = service.deriveAddress(mnemonic, index);
+      }
+
+      // Return address info (no private keys!)
+      return {
+        success: true,
+        network: network.toLowerCase(),
+        address: addressData.address,
+        derivation_path: addressData.derivationPath,
+        index: addressData.index,
+        // Additional network-specific info
+        ...(network.toLowerCase() === 'tron' && {
+          hex_address: this.tronWalletService.toHexAddress(addressData.address),
+        }),
+        ...(network.toLowerCase() === 'ethereum' && {
+          checksum_address: this.ethereumWalletService.getChecksumAddress(addressData.address),
+        }),
+        ...(network.toLowerCase() === 'bitcoin' && {
+          address_type: addressData.addressFormat,
+        }),
+        ...(network.toLowerCase() === 'solana' && {
+          public_key: addressData.publicKey,
+        }),
+      };
+    } catch (error) {
+      return {
+        error: 'Failed to derive address',
+        message: error.message,
+        hint: 'Ensure encrypted_mnemonic and MASTER_ENCRYPTION_KEY are correct',
+      };
+    }
+  }
+
+  // ==================== TEST ENDPOINTS (for development) ====================
 
   /**
    * Test endpoint: Generate a new Tron wallet
