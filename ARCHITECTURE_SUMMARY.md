@@ -1,52 +1,3 @@
-# Exbotix Wallet Service - Complete Architecture Summary
-
-## What We Built
-
-A **stateless wallet microservice** that handles cryptographic operations for your exchange. Laravel backend handles all database and business logic.
-
----
-
-## File Structure
-
-```
-Exbotix_Wallet_Service/
-├── src/
-│   ├── modules/
-│   │   └── wallets/
-│   │       ├── tron/
-│   │       │   ├── tron-wallet.service.ts ✅ (HD wallet for Tron)
-│   │       │   └── tron-wallet.module.ts
-│   │       ├── ethereum/
-│   │       │   ├── ethereum-wallet.service.ts ✅ (HD wallet for Ethereum & all EVM)
-│   │       │   └── ethereum-wallet.module.ts
-│   │       ├── bitcoin/
-│   │       │   ├── bitcoin-wallet.service.ts ✅ (HD wallet for Bitcoin)
-│   │       │   └── bitcoin-wallet.module.ts
-│   │       ├── solana/
-│   │       │   ├── solana-wallet.service.ts ✅ (HD wallet for Solana)
-│   │       │   └── solana-wallet.module.ts
-│   │       ├── wallets.controller.ts ✅ (API endpoints)
-│   │       ├── wallets.controller.simplified.ts ✅ (Cleaner version)
-│   │       └── wallets.module.ts
-│   ├── modules/encryption/
-│   │   ├── encryption.service.ts ✅ (AES-256-GCM encryption)
-│   │   └── encryption.module.ts
-│   ├── services/
-│   │   └── deposit-listener.service.ts ✅ (Optional: if wallet service runs listeners)
-│   ├── app.module.ts ✅ (Simplified, no database)
-│   └── main.ts ✅ (Entry point)
-├── docker-compose.yml ✅ (Redis only, no PostgreSQL)
-├── .env.example ✅ (Simplified environment variables)
-├── TESTING.md ✅ (How to test the APIs)
-├── LARAVEL_INTEGRATION.md ✅ (Complete Laravel integration guide)
-├── SWEEP_AND_WITHDRAWAL.md ✅ (Sweep & withdrawal implementation)
-├── ARCHITECTURE_SUMMARY.md ✅ (This file)
-├── Exbotix_Wallet_Service.postman_collection.json ✅ (Postman tests)
-└── test-wallets.sh ✅ (Automated test script)
-```
-
----
-
 ## Complete System Flow
 
 ### 1. Initial Setup (One-Time)
@@ -69,6 +20,7 @@ Exbotix_Wallet_Service/
 ```
 
 **Laravel Code:**
+
 ```php
 // Run once per network
 WalletSetupService::generateMasterSeed('tron');
@@ -137,7 +89,7 @@ WalletSetupService::generateMasterSeed('solana');
               │
               ↓
 ┌─────────────────────────────────────────────┐
-│ Laravel Deposit Listener (runs 24/7):       │
+│ Wallet Service Listener (runs 24/7):       │
 │ 1. Checks TUser1523... every 30 seconds     │
 │ 2. Detects new transaction!                 │
 │ 3. Inserts into transactions table:         │
@@ -188,7 +140,7 @@ WalletSetupService::generateMasterSeed('solana');
               ↓
 ┌─────────────────────────────────────────────┐
 │ Laravel:                                    │
-│ 1. Get Tron master mnemonic                 │
+│ 1. Get  Tron master mnemonic                │
 │ 2. Call wallet service:                     │
 │    POST /wallets/tron/sign-transaction      │
 │    {                                        │
@@ -217,6 +169,7 @@ WalletSetupService::generateMasterSeed('solana');
 ```
 
 **Result:**
+
 - User address (TUser1523...) balance: **0 USDT** (swept)
 - Hot wallet balance: **+100 USDT**
 - User's database balance: **Still 100 USDT** (unchanged)
@@ -275,6 +228,7 @@ WalletSetupService::generateMasterSeed('solana');
 ```
 
 **Result:**
+
 - User's balance: **50 USDT** (withdrawn 50)
 - Hot wallet: **-50 USDT**
 - External wallet (TExternal456...): **+50 USDT**
@@ -309,10 +263,10 @@ External User Wallets
 
 ### Database vs On-Chain Balance
 
-| Location | User Balance | Hot Wallet Balance |
-|----------|-------------|-------------------|
-| **Database** (source of truth) | 100 USDT | N/A |
-| **On-Chain** (after sweep) | 0 USDT | 100 USDT |
+| Location                       | User Balance | Hot Wallet Balance |
+| ------------------------------ | ------------ | ------------------ |
+| **Database** (source of truth) | 100 USDT     | N/A                |
+| **On-Chain** (after sweep)     | 0 USDT       | 100 USDT           |
 
 **Important:** User's **database balance** is what matters for trading/withdrawing!
 
@@ -322,12 +276,12 @@ External User Wallets
 
 ### Wallet Service Provides:
 
-| Endpoint | Purpose | Used By Laravel |
-|----------|---------|----------------|
-| `GET /wallets/{network}/generate` | Generate master mnemonic | Once per network (setup) |
-| `GET /wallets/{network}/derive` | Derive address from mnemonic + index | When user needs deposit address |
-| `GET /wallets/{network}/validate` | Validate address format | Before withdrawal |
-| `POST /wallets/{network}/sign-transaction` | Sign transaction | Sweep & withdrawal |
+| Endpoint                                   | Purpose                              | Used By Laravel                 |
+| ------------------------------------------ | ------------------------------------ | ------------------------------- |
+| `GET /wallets/{network}/generate`          | Generate master mnemonic             | Once per network (setup)        |
+| `GET /wallets/{network}/derive`            | Derive address from mnemonic + index | When user needs deposit address |
+| `GET /wallets/{network}/validate`          | Validate address format              | Before withdrawal               |
+| `POST /wallets/{network}/sign-transaction` | Sign transaction                     | Sweep & withdrawal              |
 
 ---
 
@@ -376,9 +330,6 @@ A: Nowhere. They are derived on-demand from master mnemonic + index, used to sig
 **Q: What if wallet service goes down?**
 A: Users can still see balances, trade, etc. (Laravel has all data). You just can't generate new addresses or process withdrawals until it's back up.
 
-**Q: How do I test?**
-A: Run `npm run start:dev` and use Postman collection or `./test-wallets.sh`
-
 **Q: How does Laravel call wallet service?**
 A: HTTP requests using `Illuminate\Support\Facades\Http::get()` or `Http::post()`
 
@@ -386,11 +337,3 @@ A: HTTP requests using `Illuminate\Support\Facades\Http::get()` or `Http::post()
 A: Yes, uncomment the `wallet-api` service in `docker-compose.yml`
 
 ---
-
-## Support
-
-- Technical docs: See `LARAVEL_INTEGRATION.md` and `SWEEP_AND_WITHDRAWAL.md`
-- Testing: See `TESTING.md`
-- API Collection: `Exbotix_Wallet_Service.postman_collection.json`
-
-**Wallet service is production-ready and fully functional!** 🚀
