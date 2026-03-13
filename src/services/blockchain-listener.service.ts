@@ -91,11 +91,14 @@ export class BlockchainListenerService {
         // Skip if already processed
         if (this.processedTxs.has(txHash)) continue;
 
-        // Check if incoming transaction
-        if (this.isTronIncoming(tx, address)) {
+        // Check if incoming transaction (now async)
+        const isIncoming = await this.isTronIncoming(tx, address);
+        if (isIncoming) {
           const deposit = await this.parseTronTransaction(tx, userId, address);
-          await this.notifyLaravelDeposit(deposit);
-          this.processedTxs.add(txHash);
+          if (deposit && deposit.amount > 0) {
+            await this.notifyLaravelDeposit(deposit);
+            this.processedTxs.add(txHash);
+          }
         }
       }
     } catch (error) {
@@ -103,17 +106,37 @@ export class BlockchainListenerService {
     }
   }
 
-  private isTronIncoming(tx: any, address: string): boolean {
-    // Check TRX transfers
-    if (tx.raw_data?.contract?.[0]?.parameter?.value?.to_address) {
-      const toAddress = this.tronHexToBase58(tx.raw_data.contract[0].parameter.value.to_address);
-      return toAddress === address;
+  private async isTronIncoming(tx: any, address: string): Promise<boolean> {
+    const contract = tx.raw_data?.contract?.[0];
+
+    if (!contract) return false;
+
+    // Check native TRX transfers
+    if (contract.type === 'TransferContract') {
+      const toAddress = contract.parameter?.value?.to_address;
+      if (toAddress && this.tronHexToBase58(toAddress) === address) {
+        return true;
+      }
     }
 
-    // Check TRC20 token transfers (in contract result)
-    if (tx.raw_data?.contract?.[0]?.type === 'TriggerSmartContract') {
-      // Parse TRC20 transfer event
-      // TODO: Implement TRC20 event parsing
+    // Check TRC20 token transfers
+    if (contract.type === 'TriggerSmartContract') {
+      // TRC20 Transfer event logs are in transaction info
+      const txInfo = await this.getTronTransactionInfo(tx.txID);
+
+      if (txInfo?.log && txInfo.log.length > 0) {
+        // Parse Transfer event: Transfer(address indexed from, address indexed to, uint256 value)
+        for (const log of txInfo.log) {
+          // Transfer event topic: 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+          if (log.topics && log.topics[0] === 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef') {
+            // topics[2] is the 'to' address (indexed parameter)
+            const toAddress = log.topics[2];
+            if (toAddress && this.tronHexToBase58('41' + toAddress) === address) {
+              return true;
+            }
+          }
+        }
+      }
     }
 
     return false;
@@ -127,18 +150,116 @@ export class BlockchainListenerService {
     const currentBlock = await this.getTronCurrentBlock();
     const confirmations = currentBlock - tx.blockNumber;
 
+    // Determine if TRX or TRC20
+    let coinSymbol = 'TRX';
+    let amount = 0;
+    let tokenContract = null;
+
+    if (contract.type === 'TransferContract') {
+      // Native TRX transfer
+      coinSymbol = 'TRX';
+      amount = value.amount / 1e6; // Convert SUN to TRX
+    } else if (contract.type === 'TriggerSmartContract') {
+      // TRC20 token transfer
+      const txInfo = await this.getTronTransactionInfo(tx.txID);
+
+      if (txInfo?.log && txInfo.log.length > 0) {
+        const transferLog = txInfo.log.find(
+          log => log.topics && log.topics[0] === 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+        );
+
+        if (transferLog) {
+          tokenContract = this.tronHexToBase58('41' + txInfo.contract_address);
+
+          // Get token info (symbol, decimals)
+          const tokenInfo = await this.getTRC20TokenInfo(tokenContract);
+          coinSymbol = tokenInfo.symbol;
+
+          // Decode amount from log data (uint256)
+          const amountHex = transferLog.data;
+          const amountBigInt = BigInt('0x' + amountHex);
+          amount = Number(amountBigInt) / Math.pow(10, tokenInfo.decimals);
+        }
+      }
+    }
+
     return {
       user_id: userId,
       network: 'tron',
-      coin_symbol: 'TRX', // TODO: Detect TRC20 tokens
-      amount: value.amount / 1e6, // Convert SUN to TRX
-      from_address: this.tronHexToBase58(value.owner_address),
+      coin_symbol: coinSymbol,
+      amount: amount,
+      from_address: this.tronHexToBase58(value.owner_address || value.from),
       to_address: address,
       tx_hash: tx.txID,
       confirmations: confirmations,
       block_number: tx.blockNumber,
       timestamp: tx.block_timestamp,
+      token_contract: tokenContract, // Add token contract for TRC20
     };
+  }
+
+  private async getTronTransactionInfo(txHash: string): Promise<any> {
+    try {
+      const response = await axios.post(`${this.tronRpc}/wallet/gettransactioninfobyid`, {
+        value: txHash,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting Tron transaction info:', error.message);
+      return null;
+    }
+  }
+
+  private async getTRC20TokenInfo(contractAddress: string): Promise<{ symbol: string; decimals: number }> {
+    try {
+      // Call contract to get symbol
+      const symbolResponse = await axios.post(`${this.tronRpc}/wallet/triggerconstantcontract`, {
+        owner_address: '410000000000000000000000000000000000000000',
+        contract_address: contractAddress,
+        function_selector: 'symbol()',
+        parameter: '',
+      });
+
+      // Call contract to get decimals
+      const decimalsResponse = await axios.post(`${this.tronRpc}/wallet/triggerconstantcontract`, {
+        owner_address: '410000000000000000000000000000000000000000',
+        contract_address: contractAddress,
+        function_selector: 'decimals()',
+        parameter: '',
+      });
+
+      // Parse results
+      const symbol = this.parseStringResult(symbolResponse.data?.constant_result?.[0]) || 'UNKNOWN';
+      const decimals = this.parseIntResult(decimalsResponse.data?.constant_result?.[0]) || 6;
+
+      return { symbol, decimals };
+    } catch (error) {
+      console.error('Error getting TRC20 token info:', error.message);
+      // Default to USDT-like params if fetch fails
+      return { symbol: 'UNKNOWN', decimals: 6 };
+    }
+  }
+
+  private parseStringResult(hexResult: string): string {
+    if (!hexResult) return '';
+    try {
+      // Decode hex string to UTF-8
+      const buffer = Buffer.from(hexResult, 'hex');
+      // Skip first 64 chars (ABI encoding offset + length)
+      const symbolHex = buffer.slice(64).toString('hex').replace(/00/g, '');
+      return Buffer.from(symbolHex, 'hex').toString('utf8');
+    } catch (error) {
+      return '';
+    }
+  }
+
+  private parseIntResult(hexResult: string): number {
+    if (!hexResult) return 0;
+    try {
+      return parseInt(hexResult, 16);
+    } catch (error) {
+      return 0;
+    }
   }
 
   private async getTronCurrentBlock(): Promise<number> {
@@ -147,9 +268,54 @@ export class BlockchainListenerService {
   }
 
   private tronHexToBase58(hexAddress: string): string {
-    // Convert hex address to base58
-    // Simplified - use actual tronweb for production
-    return hexAddress; // TODO: Implement proper conversion
+    try {
+      // Remove '0x' prefix if present
+      let hex = hexAddress.replace(/^0x/, '');
+
+      // Add '41' prefix if not present (mainnet prefix)
+      if (!hex.startsWith('41')) {
+        hex = '41' + hex;
+      }
+
+      // Convert hex to bytes
+      const bytes = Buffer.from(hex, 'hex');
+
+      // Calculate checksum (double SHA256)
+      const crypto = require('crypto');
+      const hash1 = crypto.createHash('sha256').update(bytes).digest();
+      const hash2 = crypto.createHash('sha256').update(hash1).digest();
+      const checksum = hash2.slice(0, 4);
+
+      // Append checksum
+      const addressWithChecksum = Buffer.concat([bytes, checksum]);
+
+      // Encode to Base58
+      return this.base58Encode(addressWithChecksum);
+    } catch (error) {
+      console.error('Error converting Tron hex to base58:', error.message);
+      return hexAddress; // Return original if conversion fails
+    }
+  }
+
+  private base58Encode(buffer: Buffer): string {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    const base = BigInt(58);
+
+    let num = BigInt('0x' + buffer.toString('hex'));
+    let encoded = '';
+
+    while (num > 0) {
+      const remainder = Number(num % base);
+      num = num / base;
+      encoded = ALPHABET[remainder] + encoded;
+    }
+
+    // Add leading '1's for leading zeros
+    for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+      encoded = '1' + encoded;
+    }
+
+    return encoded;
   }
 
   // ==================== ETHEREUM LISTENER ====================
