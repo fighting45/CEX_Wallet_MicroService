@@ -50,11 +50,14 @@ export class BlockchainListenerService {
 
   /**
    * Monitor Tron blockchain for deposits
-   * Method: HTTP polling every 30 seconds
+   * Method: HTTP polling every 5 minutes
    */
   async startTronListener(addresses: Array<{ user_id: number; address: string }>) {
     console.log('🔍 Starting Tron deposit listener...');
     console.log(`Monitoring ${addresses.length} Tron addresses`);
+
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 3;
 
     while (true) {
       try {
@@ -62,10 +65,18 @@ export class BlockchainListenerService {
           await this.checkTronDeposits(addr.user_id, addr.address);
         }
 
+        consecutiveErrors = 0; // Reset error counter on success
         await this.sleep(300000); // Check every 5 minutes
       } catch (error) {
-        console.error('Tron listener error:', error.message);
-        await this.sleep(300000); // Wait longer on error
+        consecutiveErrors++;
+        console.error(`❌ Tron listener error (${consecutiveErrors}/${maxConsecutiveErrors}):`, error.message);
+
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          console.error('💡 Please check your TRON_MAINNET_RPC URL and API credentials');
+          console.log('🔄 Continuing to retry every 5 minutes...');
+        }
+
+        await this.sleep(300000); // Wait 5 minutes before retry
       }
     }
   }
@@ -80,6 +91,7 @@ export class BlockchainListenerService {
             limit: 20,
             order_by: 'block_timestamp,desc',
           },
+          timeout: 30000, // 30 second timeout
         },
       );
 
@@ -102,7 +114,15 @@ export class BlockchainListenerService {
         }
       }
     } catch (error) {
-      console.error(`Error checking Tron deposits for ${address}:`, error.message);
+      if (error.response?.status === 401) {
+        throw new Error('Tron API authentication failed - check your API key');
+      } else if (error.code === 'ECONNREFUSED') {
+        throw new Error('Cannot connect to Tron RPC - check your network connection');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error(`⚠️ Tron API timeout for ${address} - will retry next cycle`);
+      } else {
+        throw error;
+      }
     }
   }
 
@@ -328,69 +348,118 @@ export class BlockchainListenerService {
     console.log('🔍 Starting Ethereum deposit listener...');
     console.log(`Monitoring ${addresses.length} Ethereum addresses`);
 
-    // Create WebSocket provider
-    this.ethProvider = new ethers.WebSocketProvider(this.ethereumRpc);
+    try {
+      // Create WebSocket provider
+      this.ethProvider = new ethers.WebSocketProvider(this.ethereumRpc);
 
-    // Create address to user_id mapping
-    const addressMap = new Map(addresses.map((a) => [a.address.toLowerCase(), a.user_id]));
+      // Create address to user_id mapping
+      const addressMap = new Map(addresses.map((a) => [a.address.toLowerCase(), a.user_id]));
 
-    // Listen for new blocks
-    this.ethProvider.on('block', async (blockNumber) => {
-      console.log(`📦 New Ethereum block: ${blockNumber}`);
+      // CRITICAL: Attach error handler IMMEDIATELY to prevent crashes
+      // Access the underlying WebSocket via _websocket property
+      const websocket = (this.ethProvider as any)._websocket || (this.ethProvider as any).websocket;
 
-      try {
-        const block = await this.ethProvider.getBlock(blockNumber, true);
+      if (websocket) {
+        websocket.on('error', (error: any) => {
+          console.error('❌ Ethereum WebSocket connection error:', error.message || error);
+          console.log('🔄 Will attempt to reconnect in 30 seconds...');
 
-        if (!block || !block.transactions) return;
-
-        // Check each transaction in the block
-        for (const txHash of block.transactions) {
-          const tx = await this.ethProvider.getTransaction(txHash as string);
-
-          if (!tx || !tx.to) continue;
-
-          const toAddress = tx.to.toLowerCase();
-
-          // Check if transaction is to one of our addresses
-          if (addressMap.has(toAddress)) {
-            const userId = addressMap.get(toAddress);
-
-            // Check if native ETH transfer
-            if (tx.value > 0n) {
-              const deposit = {
-                user_id: userId,
-                network: 'ethereum',
-                coin_symbol: 'ETH',
-                amount: parseFloat(ethers.formatEther(tx.value)),
-                from_address: tx.from,
-                to_address: tx.to,
-                tx_hash: tx.hash,
-                confirmations: 0, // Will be updated as blocks confirm
-                block_number: blockNumber,
-                timestamp: Date.now(),
-              };
-
-              if (!this.processedTxs.has(tx.hash)) {
-                await this.notifyLaravelDeposit(deposit);
-                this.processedTxs.add(tx.hash);
-              }
+          // Clean up old provider
+          if (this.ethProvider) {
+            try {
+              this.ethProvider.removeAllListeners();
+              this.ethProvider.destroy();
+            } catch (e) {
+              // Ignore cleanup errors
             }
-
-            // Check for ERC20 token transfers
-            await this.checkERC20Transfer(tx, userId, toAddress);
           }
-        }
-      } catch (error) {
-        console.error(`Error processing Ethereum block ${blockNumber}:`, error.message);
-      }
-    });
 
-    // Handle reconnection
-    this.ethProvider.on('error', (error) => {
-      console.error('Ethereum WebSocket error:', error);
-      // Reconnect logic
-      setTimeout(() => this.startEthereumListener(addresses), 5000);
-    });
+          // Reconnect after delay
+          setTimeout(() => {
+            console.log('🔄 Reconnecting Ethereum listener...');
+            this.startEthereumListener(addresses);
+          }, 30000);
+        });
+
+        websocket.on('close', (code: number) => {
+          if (code !== 1000) {
+            console.error(`❌ Ethereum WebSocket closed unexpectedly (code: ${code})`);
+            console.log('🔄 Reconnecting in 30 seconds...');
+
+            setTimeout(() => {
+              this.startEthereumListener(addresses);
+            }, 30000);
+          }
+        });
+      }
+
+      // Also handle provider-level errors
+      this.ethProvider.on('error', (error) => {
+        console.error('❌ Ethereum provider error:', error.message);
+      });
+
+      // Listen for new blocks
+      this.ethProvider.on('block', async (blockNumber) => {
+        console.log(`📦 New Ethereum block: ${blockNumber}`);
+
+        try {
+          const block = await this.ethProvider.getBlock(blockNumber, true);
+
+          if (!block || !block.transactions) return;
+
+          // Check each transaction in the block
+          for (const txHash of block.transactions) {
+            const tx = await this.ethProvider.getTransaction(txHash as string);
+
+            if (!tx || !tx.to) continue;
+
+            const toAddress = tx.to.toLowerCase();
+
+            // Check if transaction is to one of our addresses
+            if (addressMap.has(toAddress)) {
+              const userId = addressMap.get(toAddress);
+
+              // Check if native ETH transfer
+              if (tx.value > 0n) {
+                const deposit = {
+                  user_id: userId,
+                  network: 'ethereum',
+                  coin_symbol: 'ETH',
+                  amount: parseFloat(ethers.formatEther(tx.value)),
+                  from_address: tx.from,
+                  to_address: tx.to,
+                  tx_hash: tx.hash,
+                  confirmations: 0, // Will be updated as blocks confirm
+                  block_number: blockNumber,
+                  timestamp: Date.now(),
+                };
+
+                if (!this.processedTxs.has(tx.hash)) {
+                  await this.notifyLaravelDeposit(deposit);
+                  this.processedTxs.add(tx.hash);
+                }
+              }
+
+              // Check for ERC20 token transfers
+              await this.checkERC20Transfer(tx, userId, toAddress);
+            }
+          }
+        } catch (error) {
+          console.error(`❌ Error processing Ethereum block ${blockNumber}:`, error.message);
+        }
+      });
+
+      console.log('✅ Ethereum WebSocket listener connected successfully');
+    } catch (error) {
+      console.error('❌ Failed to start Ethereum listener:', error.message);
+      console.log('💡 Please check your ETH_MAINNET_RPC URL and API credentials');
+      console.log('🔄 Will retry in 30 seconds...');
+
+      setTimeout(() => {
+        console.log('🔄 Retrying Ethereum listener...');
+        this.startEthereumListener(addresses);
+      }, 30000);
+    }
   }
 
   private async checkERC20Transfer(tx: any, userId: number, userAddress: string) {
@@ -467,15 +536,26 @@ export class BlockchainListenerService {
     console.log('🔍 Starting Bitcoin deposit listener...');
     console.log(`Monitoring ${addresses.length} Bitcoin addresses`);
 
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 3;
+
     while (true) {
       try {
         for (const addr of addresses) {
           await this.checkBitcoinDeposits(addr.user_id, addr.address);
         }
 
+        consecutiveErrors = 0; // Reset error counter on success
         await this.sleep(300000); // Check every 5 minutes
       } catch (error) {
-        console.error('Bitcoin listener error:', error.message);
+        consecutiveErrors++;
+        console.error(`❌ Bitcoin listener error (${consecutiveErrors}/${maxConsecutiveErrors}):`, error.message);
+
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          console.error('💡 Please check your BTC_MAINNET_RPC URL and API credentials');
+          console.log('🔄 Continuing to retry every 5 minutes...');
+        }
+
         await this.sleep(300000);
       }
     }
@@ -484,7 +564,9 @@ export class BlockchainListenerService {
   private async checkBitcoinDeposits(userId: number, address: string) {
     try {
       // Get address transactions from Blockstream API
-      const response = await axios.get(`${this.bitcoinRpc}/address/${address}/txs`);
+      const response = await axios.get(`${this.bitcoinRpc}/address/${address}/txs`, {
+        timeout: 30000, // 30 second timeout
+      });
 
       const transactions = response.data;
 
@@ -521,7 +603,15 @@ export class BlockchainListenerService {
         }
       }
     } catch (error) {
-      console.error(`Error checking Bitcoin deposits for ${address}:`, error.message);
+      if (error.response?.status === 401) {
+        throw new Error('Bitcoin API authentication failed - check your API key');
+      } else if (error.code === 'ECONNREFUSED') {
+        throw new Error('Cannot connect to Bitcoin RPC - check your network connection');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error(`⚠️ Bitcoin API timeout for ${address} - will retry next cycle`);
+      } else {
+        throw error;
+      }
     }
   }
 
@@ -540,11 +630,24 @@ export class BlockchainListenerService {
     console.log('🔍 Starting Solana deposit listener...');
     console.log(`Monitoring ${addresses.length} Solana addresses`);
 
-    this.solanaConnection = new Connection(this.solanaRpc, 'confirmed');
+    try {
+      this.solanaConnection = new Connection(this.solanaRpc, 'confirmed');
 
-    // Subscribe to each address
-    for (const addr of addresses) {
-      await this.subscribeSolanaAddress(addr.user_id, addr.address);
+      // Subscribe to each address
+      for (const addr of addresses) {
+        await this.subscribeSolanaAddress(addr.user_id, addr.address);
+      }
+
+      console.log('✅ Solana WebSocket listener connected successfully');
+    } catch (error) {
+      console.error('❌ Failed to start Solana listener:', error.message);
+      console.log('💡 Please check your SOLANA_MAINNET_RPC URL and API credentials');
+      console.log('🔄 Will retry in 30 seconds...');
+
+      setTimeout(() => {
+        console.log('🔄 Retrying Solana listener...');
+        this.startSolanaListener(addresses);
+      }, 30000);
     }
   }
 
@@ -552,31 +655,35 @@ export class BlockchainListenerService {
     try {
       const publicKey = new PublicKey(address);
 
-      // Subscribe to account changes (SOL deposits)
+      // Subscribe to account changes (SOL deposits) with error handling
       this.solanaConnection.onAccountChange(
         publicKey,
         async (accountInfo, context) => {
-          console.log(`💰 Solana balance change detected for user ${userId}`);
+          try {
+            console.log(`💰 Solana balance change detected for user ${userId}`);
 
-          // Get recent transactions
-          const signatures = await this.solanaConnection.getSignaturesForAddress(publicKey, { limit: 10 });
+            // Get recent transactions
+            const signatures = await this.solanaConnection.getSignaturesForAddress(publicKey, { limit: 10 });
 
-          for (const sigInfo of signatures) {
-            if (this.processedTxs.has(sigInfo.signature)) continue;
+            for (const sigInfo of signatures) {
+              if (this.processedTxs.has(sigInfo.signature)) continue;
 
-            const tx = await this.solanaConnection.getTransaction(sigInfo.signature, {
-              maxSupportedTransactionVersion: 0,
-            });
+              const tx = await this.solanaConnection.getTransaction(sigInfo.signature, {
+                maxSupportedTransactionVersion: 0,
+              });
 
-            if (!tx) continue;
+              if (!tx) continue;
 
-            // Parse Solana transaction
-            const deposit = await this.parseSolanaTransaction(tx, userId, address, sigInfo.signature);
+              // Parse Solana transaction
+              const deposit = await this.parseSolanaTransaction(tx, userId, address, sigInfo.signature);
 
-            if (deposit) {
-              await this.notifyLaravelDeposit(deposit);
-              this.processedTxs.add(sigInfo.signature);
+              if (deposit) {
+                await this.notifyLaravelDeposit(deposit);
+                this.processedTxs.add(sigInfo.signature);
+              }
             }
+          } catch (error) {
+            console.error(`❌ Error processing Solana account change for user ${userId}:`, error.message);
           }
         },
         'confirmed',
@@ -584,7 +691,8 @@ export class BlockchainListenerService {
 
       console.log(`✅ Subscribed to Solana address: ${address}`);
     } catch (error) {
-      console.error(`Error subscribing to Solana address ${address}:`, error.message);
+      console.error(`❌ Error subscribing to Solana address ${address}:`, error.message);
+      throw error;
     }
   }
 
