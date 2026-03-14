@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { WalletsModule } from './modules/wallets/wallets.module';
+import { ListenersModule } from './modules/listeners/listeners.module';
 
 /**
  * AppModule - The root module of the application
@@ -33,6 +34,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
     }),
 
     WalletsModule, // Wallet generation and management
+    ListenersModule, // Blockchain deposit listeners
   ],
   controllers: [AppController],
   providers: [AppService],
