@@ -1,7 +1,7 @@
 {
   "name": "exbotix_wallet_service",
   "version": "1.0.0",
-  "description": "Exbotix Custodial Wallet Service - Implementation Plan",
+  "description": "Exbotix Custodial Wallet Service",
   "main": "dist/main.js",
   "scripts": {
     "build": "nest build",

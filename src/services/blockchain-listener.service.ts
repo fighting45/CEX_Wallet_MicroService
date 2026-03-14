@@ -36,6 +36,15 @@ export class BlockchainListenerService {
   // Tracking processed transactions (to avoid duplicates)
   private processedTxs: Set<string> = new Set();
 
+  // Track last processed block for each network (for catch-up logic)
+  private lastProcessedBlock: {
+    ethereum: number;
+    bitcoin: number;
+  } = {
+    ethereum: 0,
+    bitcoin: 0,
+  };
+
   constructor(private configService: ConfigService) {
     this.laravelWebhookUrl = this.configService.get('LARAVEL_URL') + '/api/webhooks/deposit';
     this.laravelApiSecret = this.configService.get('LARAVEL_API_SECRET');
@@ -433,14 +442,33 @@ export class BlockchainListenerService {
         console.error('❌ Ethereum provider error:', error.message);
       });
 
+      // Initialize last processed block if this is first run
+      if (this.lastProcessedBlock.ethereum === 0) {
+        const currentBlock = await this.ethProvider.getBlockNumber();
+        this.lastProcessedBlock.ethereum = currentBlock;
+        console.log(`🔵 Ethereum starting from block: ${currentBlock}`);
+      }
+
+      // CATCH-UP LOGIC: If we missed blocks during downtime, process them
+      const currentBlock = await this.ethProvider.getBlockNumber();
+      if (currentBlock > this.lastProcessedBlock.ethereum + 1) {
+        const missedBlocks = currentBlock - this.lastProcessedBlock.ethereum - 1;
+        console.log(`⚠️ Ethereum: Missed ${missedBlocks} blocks during downtime. Catching up...`);
+
+        // Process missed blocks (limit to last 1000 blocks to avoid overwhelming)
+        const startBlock = Math.max(this.lastProcessedBlock.ethereum + 1, currentBlock - 1000);
+        for (let blockNum = startBlock; blockNum <= currentBlock; blockNum++) {
+          await this.processEthereumBlock(blockNum, addressMap);
+        }
+      }
+
       // Listen for new blocks
       this.ethProvider.on('block', async (blockNumber) => {
         console.log(`📦 New Ethereum block: ${blockNumber}`);
 
         try {
-          const block = await this.ethProvider.getBlock(blockNumber, true);
-
-          if (!block || !block.transactions) return;
+          await this.processEthereumBlock(blockNumber, addressMap);
+          this.lastProcessedBlock.ethereum = blockNumber;
 
           // Check each transaction in the block
           for (const txHash of block.transactions) {
@@ -721,7 +749,10 @@ export class BlockchainListenerService {
     console.log(`Monitoring ${addresses.length} Solana addresses`);
 
     try {
-      this.solanaConnection = new Connection(this.solanaRpc, 'confirmed');
+      // Convert WSS to HTTPS if needed - Solana Connection expects HTTP/HTTPS
+      // It will automatically use WebSocket for subscriptions
+      const solanaRpcUrl = this.solanaRpc.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+      this.solanaConnection = new Connection(solanaRpcUrl, 'confirmed');
 
       // Subscribe to each address
       for (const addr of addresses) {
