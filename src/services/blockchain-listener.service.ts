@@ -24,6 +24,7 @@ export class BlockchainListenerService {
 
   // RPC endpoints
   private tronRpc: string;
+  private tronApiKey: string;
   private ethereumRpc: string;
   private bitcoinRpc: string;
   private solanaRpc: string;
@@ -41,6 +42,7 @@ export class BlockchainListenerService {
 
     // RPC URLs
     this.tronRpc = this.configService.get('TRON_MAINNET_RPC', 'https://api.trongrid.io');
+    this.tronApiKey = this.configService.get('TRON_API_KEY', '');
     this.ethereumRpc = this.configService.get('ETH_MAINNET_RPC', 'wss://eth-mainnet.g.alchemy.com/v2/your-api-key');
     this.bitcoinRpc = this.configService.get('BTC_MAINNET_RPC', 'https://blockstream.info/api');
     this.solanaRpc = this.configService.get('SOLANA_MAINNET_RPC', 'https://api.mainnet-beta.solana.com');
@@ -89,7 +91,11 @@ export class BlockchainListenerService {
         {
           params: {
             limit: 20,
-            order_by: 'block_timestamp,desc',
+            // Note: order_by is not supported by TronGrid v1 API
+            // Results are returned in descending order by default
+          },
+          headers: {
+            'TRON-PRO-API-KEY': this.tronApiKey,
           },
           timeout: 30000, // 30 second timeout
         },
@@ -220,9 +226,16 @@ export class BlockchainListenerService {
 
   private async getTronTransactionInfo(txHash: string): Promise<any> {
     try {
-      const response = await axios.post(`${this.tronRpc}/wallet/gettransactioninfobyid`, {
-        value: txHash,
-      });
+      const response = await axios.post(
+        `${this.tronRpc}/wallet/gettransactioninfobyid`,
+        { value: txHash },
+        {
+          headers: {
+            'TRON-PRO-API-KEY': this.tronApiKey,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
       return response.data;
     } catch (error) {
       console.error('Error getting Tron transaction info:', error.message);
@@ -232,21 +245,34 @@ export class BlockchainListenerService {
 
   private async getTRC20TokenInfo(contractAddress: string): Promise<{ symbol: string; decimals: number }> {
     try {
+      const headers = {
+        'TRON-PRO-API-KEY': this.tronApiKey,
+        'Content-Type': 'application/json',
+      };
+
       // Call contract to get symbol
-      const symbolResponse = await axios.post(`${this.tronRpc}/wallet/triggerconstantcontract`, {
-        owner_address: '410000000000000000000000000000000000000000',
-        contract_address: contractAddress,
-        function_selector: 'symbol()',
-        parameter: '',
-      });
+      const symbolResponse = await axios.post(
+        `${this.tronRpc}/wallet/triggerconstantcontract`,
+        {
+          owner_address: '410000000000000000000000000000000000000000',
+          contract_address: contractAddress,
+          function_selector: 'symbol()',
+          parameter: '',
+        },
+        { headers },
+      );
 
       // Call contract to get decimals
-      const decimalsResponse = await axios.post(`${this.tronRpc}/wallet/triggerconstantcontract`, {
-        owner_address: '410000000000000000000000000000000000000000',
-        contract_address: contractAddress,
-        function_selector: 'decimals()',
-        parameter: '',
-      });
+      const decimalsResponse = await axios.post(
+        `${this.tronRpc}/wallet/triggerconstantcontract`,
+        {
+          owner_address: '410000000000000000000000000000000000000000',
+          contract_address: contractAddress,
+          function_selector: 'decimals()',
+          parameter: '',
+        },
+        { headers },
+      );
 
       // Parse results
       const symbol = this.parseStringResult(symbolResponse.data?.constant_result?.[0]) || 'UNKNOWN';
@@ -283,7 +309,16 @@ export class BlockchainListenerService {
   }
 
   private async getTronCurrentBlock(): Promise<number> {
-    const response = await axios.get(`${this.tronRpc}/wallet/getnowblock`);
+    const response = await axios.post(
+      `${this.tronRpc}/wallet/getnowblock`,
+      {},
+      {
+        headers: {
+          'TRON-PRO-API-KEY': this.tronApiKey,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
     return response.data.block_header.raw_data.number;
   }
 
@@ -563,41 +598,50 @@ export class BlockchainListenerService {
 
   private async checkBitcoinDeposits(userId: number, address: string) {
     try {
-      // Get address transactions from Blockstream API
-      const response = await axios.get(`${this.bitcoinRpc}/address/${address}/txs`, {
-        timeout: 30000, // 30 second timeout
-      });
+      // Use JSON-RPC to scan recent blocks for transactions to this address
+      const currentHeight = await this.getBitcoinCurrentHeight();
 
-      const transactions = response.data;
+      // Scan last 6 blocks (~1 hour) - we check every 5 minutes, so this covers recent deposits
+      for (let i = 0; i < 6; i++) {
+        const blockHeight = currentHeight - i;
+        const blockHash = await this.getBitcoinBlockHash(blockHeight);
 
-      for (const tx of transactions) {
-        const txHash = tx.txid;
+        // Get block with verbosity 2 to include full transaction details
+        const block = await this.getBitcoinBlockWithTransactions(blockHash);
 
-        if (this.processedTxs.has(txHash)) continue;
+        if (!block || !block.tx) continue;
 
-        // Check if this transaction has outputs to our address
-        for (const vout of tx.vout) {
-          if (vout.scriptpubkey_address === address) {
-            // Get confirmations
-            const currentHeight = await this.getBitcoinCurrentHeight();
-            const confirmations = tx.status.confirmed ? currentHeight - tx.status.block_height + 1 : 0;
+        // Check each transaction in the block
+        for (const tx of block.tx) {
+          const txHash = tx.txid;
 
-            const deposit = {
-              user_id: userId,
-              network: 'bitcoin',
-              coin_symbol: 'BTC',
-              amount: vout.value / 1e8, // Convert satoshis to BTC
-              from_address: tx.vin[0]?.prevout?.scriptpubkey_address || 'unknown',
-              to_address: address,
-              tx_hash: txHash,
-              confirmations: confirmations,
-              block_number: tx.status.block_height || 0,
-              timestamp: tx.status.block_time || Date.now() / 1000,
-            };
+          if (this.processedTxs.has(txHash)) continue;
 
-            if (!this.processedTxs.has(txHash)) {
-              await this.notifyLaravelDeposit(deposit);
-              this.processedTxs.add(txHash);
+          // Check if any output is to our address
+          for (const vout of tx.vout) {
+            // Bitcoin RPC returns address in scriptPubKey.address (or addresses array for multisig)
+            const outputAddress = vout.scriptPubKey?.address || vout.scriptPubKey?.addresses?.[0];
+
+            if (outputAddress === address) {
+              const deposit = {
+                user_id: userId,
+                network: 'bitcoin',
+                coin_symbol: 'BTC',
+                amount: vout.value, // Already in BTC from JSON-RPC
+                from_address: tx.vin?.[0]?.prevout?.scriptPubKey?.address || 'coinbase',
+                to_address: address,
+                tx_hash: txHash,
+                confirmations: currentHeight - blockHeight + 1,
+                block_number: blockHeight,
+                timestamp: block.time || Date.now() / 1000,
+              };
+
+              console.log(`💰 Bitcoin deposit detected: ${deposit.amount} BTC to user ${userId}`);
+
+              if (!this.processedTxs.has(txHash)) {
+                await this.notifyLaravelDeposit(deposit);
+                this.processedTxs.add(txHash);
+              }
             }
           }
         }
@@ -615,9 +659,55 @@ export class BlockchainListenerService {
     }
   }
 
+  private async getBitcoinBlockHash(height: number): Promise<string> {
+    const response = await axios.post(
+      this.bitcoinRpc,
+      {
+        jsonrpc: '1.0',
+        id: 'getblockhash',
+        method: 'getblockhash',
+        params: [height],
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000,
+      },
+    );
+    return response.data.result;
+  }
+
+  private async getBitcoinBlockWithTransactions(blockHash: string): Promise<any> {
+    const response = await axios.post(
+      this.bitcoinRpc,
+      {
+        jsonrpc: '1.0',
+        id: 'getblock',
+        method: 'getblock',
+        params: [blockHash, 2], // Verbosity 2 = full transaction details (no need for getrawtransaction)
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000,
+      },
+    );
+    return response.data.result;
+  }
+
   private async getBitcoinCurrentHeight(): Promise<number> {
-    const response = await axios.get(`${this.bitcoinRpc}/blocks/tip/height`);
-    return response.data;
+    const response = await axios.post(
+      this.bitcoinRpc,
+      {
+        jsonrpc: '1.0',
+        id: 'getblockcount',
+        method: 'getblockcount',
+        params: [],
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000,
+      },
+    );
+    return response.data.result;
   }
 
   // ==================== SOLANA LISTENER ====================
